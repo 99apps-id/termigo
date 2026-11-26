@@ -76,12 +76,12 @@ func TestCodexStreamUsesTheResponsesAPI(t *testing.T) {
 	if gotPath != "/responses" {
 		t.Errorf("path = %q, want /responses", gotPath)
 	}
-	if gotAuth != "Bearer oauth-token" || gotAccount != "acct_9" || gotOriginator != "codex_cli_rs" {
+	if gotAuth != "Bearer oauth-token" || gotAccount != "acct_9" || gotOriginator != "codex_vscode" {
 		t.Errorf("headers: auth=%q account=%q originator=%q", gotAuth, gotAccount, gotOriginator)
 	}
 	// The backend gates newer models on the Codex CLI identity, so the version
 	// header and User-Agent must carry a real release, not a placeholder.
-	if gotVersion != codexCLIVersion || gotAgent != "codex_cli_rs/"+codexCLIVersion {
+	if gotVersion != codexCLIVersion || gotAgent != codexUserAgent() || !strings.HasPrefix(gotAgent, "codex_vscode/"+codexCLIVersion+" (") {
 		t.Errorf("identity headers: version=%q user-agent=%q", gotVersion, gotAgent)
 	}
 	if gotSessionID == "" {

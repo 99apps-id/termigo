@@ -285,7 +285,7 @@ async fn login_openai_codex(app: &tauri::AppHandle) -> Result<OAuthTokens, Strin
             ("state", &state),
             ("id_token_add_organizations", "true"),
             ("codex_cli_simplified_flow", "true"),
-            ("originator", "codex_cli_rs"),
+            ("originator", super::chatgpt_auth::ORIGINATOR),
         ])
     );
 
@@ -341,8 +341,8 @@ async fn login_openai_codex(app: &tauri::AppHandle) -> Result<OAuthTokens, Strin
     let res = client
         .post(TOKEN_URL)
         .header("content-type", "application/x-www-form-urlencoded")
-        .header("user-agent", "codex_cli_rs/0.159.0")
-        .header("originator", "codex_cli_rs")
+        .header("user-agent", super::chatgpt_auth::codex_user_agent())
+        .header("originator", super::chatgpt_auth::ORIGINATOR)
         .body(form)
         .send()
         .await
@@ -384,7 +384,7 @@ async fn login_openai_codex(app: &tauri::AppHandle) -> Result<OAuthTokens, Strin
 // ── Claude (Claude Code OAuth) ──────────────────────────────────────────────
 //
 // Mirrors the ODON flow (claude.ai authorize, api.anthropic.com token, the
-// claude-cli/2.1.290 identity): the loopback redirect on the registered port is preferred, and
+// claude-cli identity): the loopback redirect on the registered port is preferred, and
 // when that port is held by another program the login switches to the hosted
 // pasted-code redirect instead of failing.
 
@@ -393,7 +393,7 @@ async fn login_openai_codex(app: &tauri::AppHandle) -> Result<OAuthTokens, Strin
 /// current; `TERMIGO_CLAUDE_CLI_VERSION` overrides it without a rebuild. The
 /// TypeScript side (`CLAUDE_CLI_VERSION` in src/modules/ai/config.ts) pins the
 /// same release; bump both together.
-pub const CLAUDE_CLI_VERSION: &str = "2.1.325";
+pub const CLAUDE_CLI_VERSION: &str = "2.1.332";
 
 const CLAUDE_CLIENT_ID: &str = "9d1c250a-e61b-44d9-88ed-5944d1962f5e";
 const CLAUDE_AUTHORIZE_URL: &str = "https://claude.ai/oauth/authorize";
@@ -1252,8 +1252,8 @@ async fn do_refresh_token(provider: &str, refresh_token: &str) -> Result<OAuthTo
             let res = client
                 .post(TOKEN_URL)
                 .header("content-type", "application/x-www-form-urlencoded")
-                .header("user-agent", "codex_cli_rs/0.159.0")
-                .header("originator", "codex_cli_rs")
+                .header("user-agent", super::chatgpt_auth::codex_user_agent())
+                .header("originator", super::chatgpt_auth::ORIGINATOR)
                 .body(form)
                 .send()
                 .await

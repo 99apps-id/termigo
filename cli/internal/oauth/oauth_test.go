@@ -194,7 +194,7 @@ func TestOpenAICodexUsesTheLoopbackPKCEFlow(t *testing.T) {
 	if spec.AuthorizeURL != "https://auth.openai.com/oauth/authorize" {
 		t.Errorf("authorize = %q", spec.AuthorizeURL)
 	}
-	if spec.ExtraAuth["codex_cli_simplified_flow"] != "true" || spec.ExtraAuth["originator"] != "codex_cli_rs" {
+	if spec.ExtraAuth["codex_cli_simplified_flow"] != "true" || spec.ExtraAuth["originator"] != "codex_vscode" {
 		t.Errorf("extra auth = %#v", spec.ExtraAuth)
 	}
 	if strings.TrimSpace(spec.RefreshScope) == "" {

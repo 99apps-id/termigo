@@ -34,6 +34,30 @@ use tokio::net::TcpListener;
 const CLIENT_ID: &str = "app_EMoamEEZ73f0CkXaXp7hrann";
 const AUTHORIZE_URL: &str = "https://auth.openai.com/oauth/authorize";
 const TOKEN_URL: &str = "https://auth.openai.com/oauth/token";
+/// The Codex VS Code extension's originator, a first-party value in OpenAI's own
+/// client. Keep `CODEX_CLI_VERSION` in step with `CODEX_CLI_VERSION` in
+/// src/modules/ai/config.ts and `codexCLIVersion` in
+/// cli/internal/provider/codex.go.
+pub(crate) const ORIGINATOR: &str = "codex_vscode";
+const CODEX_CLI_VERSION: &str = "0.172.0";
+
+/// The User-Agent the Codex client builds:
+/// `{originator}/{version} ({os_type} {os_version}; {arch}) {terminal}`. The OS
+/// version is `Unknown` (what os_info reports when it cannot tell) and the
+/// terminal token is the bare `vscode` of a client with no known version.
+pub(crate) fn codex_user_agent() -> String {
+    let os = match std::env::consts::OS {
+        "windows" => "Windows",
+        "macos" => "Mac OS",
+        "linux" => "Linux",
+        _ => "Unknown",
+    };
+    let arch = match std::env::consts::ARCH {
+        "aarch64" => "arm64",
+        other => other,
+    };
+    format!("{ORIGINATOR}/{CODEX_CLI_VERSION} ({os} Unknown; {arch}) vscode")
+}
 /// The one loopback callback the client allows. The port is not ours to pick.
 const REDIRECT_URI: &str = "http://localhost:1455/auth/callback";
 const CALLBACK_ADDR: &str = "127.0.0.1:1455";
@@ -183,8 +207,8 @@ async fn post_token(form: String) -> Result<TokenResponse, String> {
     let res = client
         .post(TOKEN_URL)
         .header("content-type", "application/x-www-form-urlencoded")
-        .header("user-agent", "codex_cli_rs/0.159.0")
-        .header("originator", "codex_cli_rs")
+        .header("user-agent", codex_user_agent())
+        .header("originator", ORIGINATOR)
         .body(form)
         .send()
         .await
@@ -307,7 +331,7 @@ pub async fn chatgpt_auth_login(app: tauri::AppHandle) -> Result<ChatGptTokens, 
             ("state", &state),
             ("id_token_add_organizations", "true"),
             ("codex_cli_simplified_flow", "true"),
-            ("originator", "codex_cli_rs"),
+            ("originator", ORIGINATOR),
         ])
     );
 
@@ -381,6 +405,14 @@ mod tests {
 
     fn jwt_with(payload: serde_json::Value) -> String {
         format!("h.{}.s", b64url(payload.to_string().as_bytes()))
+    }
+
+    #[test]
+    fn user_agent_follows_the_codex_client_format() {
+        let ua = codex_user_agent();
+        assert!(ua.starts_with("codex_vscode/0.172.0 ("), "{ua}");
+        assert!(ua.ends_with(") vscode"), "{ua}");
+        assert!(ua.contains(" Unknown; "), "{ua}");
     }
 
     #[test]

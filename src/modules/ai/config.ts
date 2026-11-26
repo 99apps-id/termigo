@@ -1646,13 +1646,44 @@ export const CHATGPT_BASE_URL = "https://chatgpt.com/backend-api/codex";
 // `version` header, so both carry it (the Go CLI's Codex client in
 // cli/internal/provider/codex.go pins the same release for the same reason,
 // and the Rust token exchange sends the same User-Agent). Bump all of them
-// together.
-export const CODEX_CLI_VERSION = "0.159.0";
-// The endpoint gates on the same CLI identity as the native odon-ai Codex client.
-// `chatgpt-account-id` is added per request from the signed-in token.
+// together. The newest models carry a `minimal_client_version` in OpenAI's
+// bundled catalog (codex-rs/models-manager/models.json; gpt-6.2-* needs
+// 0.166.0), so a stale pin hides them.
+export const CODEX_CLI_VERSION = "0.172.0";
+// The Codex VS Code extension's originator. OpenAI's own client lists it as a
+// first-party originator (is_first_party_originator in
+// codex-rs/login/src/auth/default_client.rs).
+export const CODEX_ORIGINATOR = "codex_vscode";
+
+/**
+ * The User-Agent the Codex client builds in get_codex_user_agent():
+ * `{originator}/{version} ({os_type} {os_version}; {arch}) {terminal}`.
+ * The OS version cannot be read from a webview, so it is sent as `Unknown`
+ * (what os_info reports when it cannot tell); the terminal token is the bare
+ * `vscode` the client sends when no version is known.
+ */
+export function codexUserAgent(
+  nav:
+    | { userAgent?: string; platform?: string }
+    | undefined = typeof navigator === "undefined" ? undefined : navigator,
+): string {
+  const ua = `${nav?.userAgent ?? ""} ${nav?.platform ?? ""}`;
+  const os = /Win/i.test(ua)
+    ? "Windows"
+    : /Mac/i.test(ua)
+      ? "Mac OS"
+      : /Linux|X11/i.test(ua)
+        ? "Linux"
+        : "Unknown";
+  const arch = /arm64|aarch64|\barm\b/i.test(ua) ? "arm64" : "x86_64";
+  return `${CODEX_ORIGINATOR}/${CODEX_CLI_VERSION} (${os} Unknown; ${arch}) vscode`;
+}
+
+// The endpoint gates on the Codex client identity (originator, User-Agent and
+// `version`). `chatgpt-account-id` is added per request from the signed-in token.
 export const CHATGPT_HEADERS: Record<string, string> = {
-  originator: "codex_cli_rs",
-  "User-Agent": `codex_cli_rs/${CODEX_CLI_VERSION}`,
+  originator: CODEX_ORIGINATOR,
+  "User-Agent": codexUserAgent(),
   version: CODEX_CLI_VERSION,
 };
 
@@ -1660,7 +1691,42 @@ export const CHATGPT_HEADERS: Record<string, string> = {
 // Anthropic gates newer models on a minimum client version, so this tracks the
 // current CLI; the Rust token exchange (`CLAUDE_CLI_VERSION` in
 // src-tauri/src/modules/oauth.rs) pins the same release. Bump both together.
-export const CLAUDE_CLI_VERSION = "2.1.325";
+export const CLAUDE_CLI_VERSION = "2.1.332";
+
+export type AnthropicModelTraits = {
+  /** The most output tokens one response may carry. */
+  maxOutputTokens: number;
+  /** Whether `thinking: { type: "adaptive" }` is accepted. */
+  adaptiveThinking: boolean;
+};
+
+/**
+ * Output ceiling and thinking support per Claude model, taken from the
+ * subscription endpoint's own catalog (`GET /v1/models`, fields `max_tokens`
+ * and `capabilities.thinking`, read 2026-11-27) and confirmed by a request:
+ * 128000 is accepted and 128001 is refused with "maximum allowed number of
+ * output tokens for claude-opus-5-5".
+ *
+ * The AI SDK only knows the models it shipped with and gives any other id a
+ * 4096-token ceiling, which cuts a long answer or a tool call off in the
+ * middle (`stop_reason: max_tokens`). `null` means "not listed": leave the SDK
+ * default alone.
+ */
+export function anthropicModelTraits(
+  apiModelId: string,
+): AnthropicModelTraits | null {
+  const id = apiModelId.toLowerCase();
+  if (/^claude-(?:opus|sonnet|haiku|fable)-5(?:-|$)/.test(id)) {
+    return { maxOutputTokens: 128_000, adaptiveThinking: true };
+  }
+  if (/^claude-(?:opus-4-[678]|sonnet-4-6)(?:-|$)/.test(id)) {
+    return { maxOutputTokens: 128_000, adaptiveThinking: true };
+  }
+  if (/^claude-(?:opus|sonnet|haiku)-4-5(?:-|$)/.test(id)) {
+    return { maxOutputTokens: 64_000, adaptiveThinking: false };
+  }
+  return null;
+}
 // Headers the official CLI sends on a subscription Messages request. The
 // per-process `X-Claude-Code-Session-Id` is added in buildLanguageModel.
 export const CLAUDE_OAUTH_HEADERS: Record<string, string> = {

@@ -5,13 +5,43 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"runtime"
 	"strings"
 )
 
-// codexCLIVersion is the Codex CLI release whose identity the ChatGPT backend
-// expects. It gates access to the newer models, so it is sent in both the
-// User-Agent and the version header.
-const codexCLIVersion = "0.159.0"
+// codexCLIVersion is the Codex release whose identity the ChatGPT backend
+// expects. It gates access to the newer models (gpt-6.2-* needs 0.166.0), so it
+// is sent in both the User-Agent and the version header. Keep it in step with
+// CODEX_CLI_VERSION in src/modules/ai/config.ts and the Rust token exchange.
+const codexCLIVersion = "0.172.0"
+
+// codexOriginator is the Codex VS Code extension's originator, a first-party
+// value in OpenAI's own client.
+const codexOriginator = "codex_vscode"
+
+// codexUserAgent builds the string the Codex client sends:
+// {originator}/{version} ({os_type} {os_version}; {arch}) {terminal}. The OS
+// version is "Unknown" (what os_info reports when it cannot tell) and the
+// terminal token is the bare "vscode" of a client with no known version.
+func codexUserAgent() string {
+	osName := "Unknown"
+	switch runtime.GOOS {
+	case "windows":
+		osName = "Windows"
+	case "darwin":
+		osName = "Mac OS"
+	case "linux":
+		osName = "Linux"
+	}
+	arch := runtime.GOARCH
+	switch arch {
+	case "amd64":
+		arch = "x86_64"
+	case "arm64", "arm":
+		arch = "arm64"
+	}
+	return fmt.Sprintf("%s/%s (%s Unknown; %s) vscode", codexOriginator, codexCLIVersion, osName, arch)
+}
 
 // codexClient speaks the Responses API served by the ChatGPT backend for a
 // Codex login. It is not chat-completions: the request carries input items and
@@ -60,8 +90,8 @@ func (c *codexClient) Stream(ctx context.Context, req ChatRequest, emit func(Str
 	key := c.currentKey()
 	headers := map[string]string{
 		"Authorization": "Bearer " + key,
-		"originator":    "codex_cli_rs",
-		"User-Agent":    "codex_cli_rs/" + codexCLIVersion,
+		"originator":    codexOriginator,
+		"User-Agent":    codexUserAgent(),
 		"version":       codexCLIVersion,
 		"session_id":    c.SessionID(),
 	}

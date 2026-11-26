@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   apiModelIdDiffers,
+  anthropicModelTraits,
   CHATGPT_HEADERS,
   CLAUDE_CLI_VERSION,
   CLAUDE_OAUTH_HEADERS,
   CODEX_CLI_VERSION,
+  codexUserAgent,
   type CustomEndpoint,
   compatModelIdForEndpoint,
   DEFAULT_MODEL_ID,
@@ -330,15 +332,60 @@ describe("resolveModelContextLimit", () => {
   });
 });
 
+describe("anthropicModelTraits", () => {
+  // Values read from the subscription endpoint's catalog (GET /v1/models).
+  it("gives every 5.x model the 128000-token ceiling the endpoint reports", () => {
+    for (const id of [
+      "claude-fable-5-2",
+      "claude-opus-5-5",
+      "claude-sonnet-5-5",
+      "claude-haiku-5-5",
+      "claude-opus-5",
+    ]) {
+      expect(anthropicModelTraits(id), id).toEqual({
+        maxOutputTokens: 128_000,
+        adaptiveThinking: true,
+      });
+    }
+  });
+
+  it("separates the 4.5 family, which has no adaptive thinking", () => {
+    expect(anthropicModelTraits("claude-opus-4-5-20251101")).toEqual({
+      maxOutputTokens: 64_000,
+      adaptiveThinking: false,
+    });
+    expect(anthropicModelTraits("claude-opus-4-8")?.maxOutputTokens).toBe(
+      128_000,
+    );
+  });
+
+  it("returns null for an id it has no data for", () => {
+    expect(anthropicModelTraits("claude-3-haiku-20240307")).toBeNull();
+    expect(anthropicModelTraits("gpt-6-sol")).toBeNull();
+    expect(anthropicModelTraits("claude-opus-50")).toBeNull();
+  });
+});
+
 describe("ChatGPT (Codex backend) request identity", () => {
-  it("matches odon-ai's native Codex CLI identity", () => {
-    expect(CHATGPT_HEADERS.originator).toBe("codex_cli_rs");
-    expect(CHATGPT_HEADERS["User-Agent"]).toBe(
-      `codex_cli_rs/${CODEX_CLI_VERSION}`,
+  it("matches the Codex VS Code extension identity", () => {
+    expect(CHATGPT_HEADERS.originator).toBe("codex_vscode");
+    expect(CHATGPT_HEADERS["User-Agent"]).toMatch(
+      new RegExp(
+        `^codex_vscode/${CODEX_CLI_VERSION.replaceAll(".", "\\.")} \\((Windows|Mac OS|Linux|Unknown) Unknown; (x86_64|arm64)\\) vscode$`,
+      ),
     );
     expect(CHATGPT_HEADERS.version).toBe(CODEX_CLI_VERSION);
     expect(CHATGPT_HEADERS).not.toHaveProperty("OpenAI-Beta");
     expect(CODEX_CLI_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
+  });
+
+  it("builds the User-Agent from the host platform", () => {
+    expect(
+      codexUserAgent({ userAgent: "Mozilla/5.0 (X11; Linux aarch64)" }),
+    ).toBe(`codex_vscode/${CODEX_CLI_VERSION} (Linux Unknown; arm64) vscode`);
+    expect(codexUserAgent({ platform: "Win32" })).toBe(
+      `codex_vscode/${CODEX_CLI_VERSION} (Windows Unknown; x86_64) vscode`,
+    );
   });
 });
 
