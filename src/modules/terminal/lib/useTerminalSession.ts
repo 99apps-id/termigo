@@ -1,4 +1,5 @@
 import { ensureMonoFontsLoaded } from "@/lib/fonts";
+import { IS_LINUX } from "@/lib/platform";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { invoke } from "@tauri-apps/api/core";
 import type { SearchAddon } from "@xterm/addon-search";
@@ -24,7 +25,12 @@ import {
   registerProgressHandler,
   registerPromptTracker,
 } from "./osc-handlers";
-import { openPty, type PtyHandlers, type PtySession } from "./pty-bridge";
+import {
+  getPtyCwd,
+  openPty,
+  type PtyHandlers,
+  type PtySession,
+} from "./pty-bridge";
 import "../block/block.css";
 import { ensureAgentActivityListener, isAgentActivePty } from "./agentActivity";
 import { containsSchemeSeparator, findLocalUrl } from "./detectUrl";
@@ -68,6 +74,13 @@ type Session = {
   ptyOpening: boolean;
   initialCwd: string | undefined;
   lastCwd: string | null;
+  /**
+   * Whether this shell has ever reported its directory through OSC 7. A shell
+   * with no integration (fish, dash, a prompt framework that replaced our
+   * hook) never does, and `lastCwd` would then stay on the directory the pane
+   * was opened in. Such a pane falls back to reading the shell's real cwd.
+   */
+  oscCwdSeen: boolean;
   pendingExit: number | null;
   shellExited: boolean;
   callbacks: Callbacks;
@@ -116,6 +129,56 @@ type Session = {
 };
 
 const sessions = new Map<number, Session>();
+
+// Linux fallback for a pane whose shell never reports its directory (OSC 7).
+// Without it `lastCwd` stays on the directory the pane opened in, so after
+// `cd ~` the tab, the explorer root and the AI's workspace all keep pointing at
+// the old project. `/proc/<shell>/cwd` is the shell's own directory, so unlike
+// an in-band OSC 7 it cannot be forged by command output. A pane that has ever
+// reported through OSC 7 is left to it, so a working integration costs nothing.
+const CWD_POLL_MS = 2000;
+let cwdPollTimer: ReturnType<typeof setInterval> | null = null;
+let cwdPollBusy = false;
+
+async function pollShellCwds(): Promise<void> {
+  if (cwdPollBusy || document.hidden) return;
+  cwdPollBusy = true;
+  try {
+    for (const s of [...sessions.values()]) {
+      const pty = s.pty;
+      if (
+        !pty ||
+        s.disposed ||
+        s.shellExited ||
+        s.opener !== null ||
+        s.oscCwdSeen ||
+        !s.visibleNow
+      ) {
+        continue;
+      }
+      let next: string | null = null;
+      try {
+        next = await getPtyCwd(pty.id);
+      } catch {
+        // The shell exited between the check and the read: nothing to track.
+        continue;
+      }
+      if (!next || s.disposed || s.pty !== pty || s.oscCwdSeen) continue;
+      if (s.lastCwd === next) continue;
+      s.lastCwd = next;
+      s.callbacks.onCwd?.(next);
+    }
+  } finally {
+    cwdPollBusy = false;
+  }
+}
+
+function ensureCwdPoll(): void {
+  if (!IS_LINUX || cwdPollTimer !== null) return;
+  cwdPollTimer = setInterval(() => {
+    void pollShellCwds();
+  }, CWD_POLL_MS);
+}
 
 // Block-overlay viewport listeners, keyed by leafId at module scope so the
 // overlay (a child) can subscribe before the parent effect creates the session.
@@ -480,6 +543,7 @@ function ensureSession(
     ptyOpening: false,
     initialCwd,
     lastCwd: null,
+    oscCwdSeen: false,
     pendingExit: null,
     shellExited: false,
     callbacks: {},
@@ -512,6 +576,7 @@ function ensureSession(
     persistKey,
   };
   sessions.set(leafId, session);
+  ensureCwdPoll();
 
   session.ready = (async () => {
     await ensureMonoFontsLoaded();
@@ -910,6 +975,7 @@ function bindLeafToSlot(leafId: number, s: Session): void {
         const deco = new BlockDecorations(term, {
           onCwd: (next) => {
             markSessionReady(leafId);
+            s.oscCwdSeen = true;
             if (s.lastCwd === next) return;
             s.lastCwd = next;
             s.callbacks.onCwd?.(next);
@@ -948,6 +1014,7 @@ function bindLeafToSlot(leafId: number, s: Session): void {
         term,
         (next) => {
           markSessionReady(leafId);
+          s.oscCwdSeen = true;
           if (s.lastCwd === next) return;
           s.lastCwd = next;
           s.callbacks.onCwd?.(next);
