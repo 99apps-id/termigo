@@ -1,5 +1,5 @@
 import { CLAUDE_CLI_VERSION } from "../config";
-import { getOAuthAccess } from "./oauthAuth";
+import { forceRefreshOAuthAccess, getOAuthAccess } from "./oauthAuth";
 
 export const CLAUDE_CODE_IDENTITY =
   "You are Claude Code, Anthropic's official CLI for Claude.";
@@ -386,6 +386,12 @@ export function sanitizeClaudeToolName(name: string): string {
   return cleaned || "tool";
 }
 
+// Truncate the base, never the suffix: cutting `_2` off a 128-char name gave
+// back the colliding name itself, and the dedupe loop below never ended.
+function withToolSuffix(base: string, suffix: string): string {
+  return `${base.slice(0, 128 - suffix.length)}${suffix}`;
+}
+
 function cloakOne(
   name: string,
   aliases: Map<string, string>,
@@ -393,14 +399,14 @@ function cloakOne(
 ): string {
   let cloaked = sanitizeClaudeToolName(name);
   if (!cloaked.endsWith(CLAUDE_TOOL_SUFFIX)) {
-    cloaked = sanitizeClaudeToolName(`${cloaked}${CLAUDE_TOOL_SUFFIX}`);
+    cloaked = withToolSuffix(cloaked, CLAUDE_TOOL_SUFFIX);
   }
   if (present.has(cloaked) && aliases.get(cloaked) !== name) {
     let n = 2;
-    let candidate = sanitizeClaudeToolName(`${cloaked}_${n}`);
+    let candidate = withToolSuffix(cloaked, `_${n}`);
     while (present.has(candidate) && aliases.get(candidate) !== name) {
       n += 1;
-      candidate = sanitizeClaudeToolName(`${cloaked}_${n}`);
+      candidate = withToolSuffix(cloaked, `_${n}`);
     }
     cloaked = candidate;
   }
@@ -600,11 +606,26 @@ function applyClaudeOAuthHeaders(
  * - refreshes OAuth token once on 401 and upgrades CLI version once on
  *   `claude_code_version_too_old`
  */
+/**
+ * A token the endpoint just refused (401). A parallel request may already have
+ * renewed it, so the keyring is checked first; otherwise renewal is forced,
+ * because `getOAuthAccess` only renews inside the expiry skew and would hand
+ * back the same revoked token.
+ */
+export async function renewClaudeAccess(
+  rejected: string,
+): Promise<string | null> {
+  const latest = await getOAuthAccess("claude-oauth");
+  if (latest && latest.accessToken !== rejected) return latest.accessToken;
+  return (await forceRefreshOAuthAccess("claude-oauth"))?.accessToken ?? null;
+}
+
 export function createClaudeOAuthFetch(
   baseFetch: typeof fetch,
   initialAccessToken: string,
-  refreshAccess: () => Promise<string | null> = async () =>
-    (await getOAuthAccess("claude-oauth"))?.accessToken ?? null,
+  refreshAccess: (
+    rejected: string,
+  ) => Promise<string | null> = renewClaudeAccess,
 ): typeof fetch {
   let currentToken = initialAccessToken;
   const sessionId =
@@ -638,14 +659,15 @@ export function createClaudeOAuthFetch(
     }
 
     const sendOnce = async (): Promise<Response> => {
+      const requestToken = currentToken;
       const headers = new Headers(
         init?.headers ?? (input instanceof Request ? input.headers : undefined),
       );
       const sessionUuid = await uuidFromSeed(`session:${sessionId}`);
-      applyClaudeOAuthHeaders(headers, currentToken, hasPdf, sessionUuid);
+      applyClaudeOAuthHeaders(headers, requestToken, hasPdf, sessionUuid);
       let body = init?.body;
       if (parsedBody) {
-        const userId = await claudeOAuthUserId(currentToken, sessionId);
+        const userId = await claudeOAuthUserId(requestToken, sessionId);
         // Built per attempt: the fingerprint carries the client version, which
         // a `claude_code_version_too_old` answer can change between attempts.
         const billing = {
@@ -667,11 +689,12 @@ export function createClaudeOAuthFetch(
       return baseFetch(url, { ...init, headers, body });
     };
 
+    const rejectedToken = currentToken;
     let res = await sendOnce();
 
     if (res.status === 401) {
-      const renewed = await refreshAccess();
-      if (renewed) {
+      const renewed = await refreshAccess(rejectedToken);
+      if (renewed && renewed !== rejectedToken) {
         currentToken = renewed;
         res = await sendOnce();
       }

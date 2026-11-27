@@ -124,8 +124,7 @@ export async function getOAuthAccount(
   const nowSecs = Math.floor(Date.now() / 1000);
   if (t.expires_at > 0 && t.expires_at <= nowSecs) {
     if (!t.refresh_token || !(await refreshOAuthTokens(provider, t))) {
-      await clearOAuthTokens(provider);
-      return null;
+      if (!(await clearUnlessRotated(provider, t))) return null;
     }
     const refreshed = await readOAuthTokens(provider);
     if (!refreshed) return null;
@@ -149,18 +148,34 @@ export async function isOAuthSignedIn(provider: ProviderId): Promise<boolean> {
   return (await readOAuthTokens(provider)) !== null;
 }
 
-const activeRefreshes = new Map<string, Promise<OAuthTokens | null>>();
+// One refresh per PROVIDER, not per refresh token: a caller holding a token
+// that a concurrent refresh already rotated must wait for, or reuse, that
+// result instead of sending the spent token.
+const activeRefreshes = new Map<ProviderId, Promise<OAuthTokens | null>>();
 
 async function refreshOAuthTokens(
   provider: ProviderId,
   current: OAuthTokens,
 ): Promise<OAuthTokens | null> {
-  const key = `${provider}:${current.refresh_token}`;
-  const existing = activeRefreshes.get(key);
+  const existing = activeRefreshes.get(provider);
   if (existing) return existing;
 
   const promise = (async () => {
     try {
+      // Sub-agents refresh in parallel. One that read the keyring before a
+      // sibling rotated R1 -> R2 would otherwise send the spent R1, fail, and
+      // then clear the valid R2 the sibling just stored.
+      const stored = await readOAuthTokens(provider);
+      if (!stored) return null;
+      if (
+        (stored.refresh_token &&
+          stored.refresh_token !== current.refresh_token) ||
+        (stored.access_token !== current.access_token &&
+          (stored.expires_at === 0 ||
+            stored.expires_at > Math.floor(Date.now() / 1000)))
+      ) {
+        return stored;
+      }
       const backendProvider =
         provider === "chatgpt" ? "openai-codex" : provider;
       const refreshed = await invoke<OAuthTokens>("oauth_refresh", {
@@ -182,12 +197,35 @@ async function refreshOAuthTokens(
       logRefreshFailure(provider, e);
       return null;
     } finally {
-      activeRefreshes.delete(key);
+      activeRefreshes.delete(provider);
     }
   })();
 
-  activeRefreshes.set(key, promise);
+  activeRefreshes.set(provider, promise);
   return promise;
+}
+
+/**
+ * Clears the stored credential after a failed refresh, unless another caller
+ * already rotated it: then the keyring holds a working pair, which is returned
+ * instead of being deleted. Returns null once cleared.
+ */
+async function clearUnlessRotated(
+  provider: ProviderId,
+  failed: OAuthTokens,
+): Promise<OAuthTokens | null> {
+  const latest = await readOAuthTokens(provider);
+  if (
+    latest &&
+    ((latest.refresh_token && latest.refresh_token !== failed.refresh_token) ||
+      (latest.access_token !== failed.access_token &&
+        (latest.expires_at === 0 ||
+          latest.expires_at > Math.floor(Date.now() / 1000))))
+  ) {
+    return latest;
+  }
+  await clearOAuthTokens(provider);
+  return null;
 }
 
 function logRefreshFailure(provider: ProviderId, e: unknown) {
@@ -214,8 +252,12 @@ export async function getOAuthAccess(
       };
     }
     if (t.expires_at <= nowSecs) {
-      await clearOAuthTokens(provider);
-      return null;
+      const latest = await clearUnlessRotated(provider, t);
+      if (!latest) return null;
+      return {
+        accessToken: latest.access_token,
+        accountId: latest.account_id ?? null,
+      };
     }
   }
 

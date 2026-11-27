@@ -583,6 +583,72 @@ describe("claudeOAuth", () => {
     expect(res.status).toBe(401);
   });
 
+  it("retries concurrent 401s using each request's rejected token", async () => {
+    let releaseSecond!: () => void;
+    const secondResponse = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    let bothSent!: () => void;
+    const bothRequests = new Promise<void>((resolve) => {
+      bothSent = resolve;
+    });
+    let oldRequests = 0;
+    const baseFetch = vi.fn(async (_url: unknown, init?: RequestInit) => {
+      const token = new Headers(init?.headers).get("authorization");
+      if (token === "Bearer A1") {
+        oldRequests += 1;
+        if (oldRequests === 2) {
+          bothSent();
+          await secondResponse;
+        } else {
+          await bothRequests;
+        }
+        return new Response("unauthorized", { status: 401 });
+      }
+      return new Response("ok");
+    });
+    const refresh = vi.fn(async () => "A2");
+    const wrapped = createClaudeOAuthFetch(
+      baseFetch as unknown as typeof fetch,
+      "A1",
+      refresh,
+    );
+    const first = wrapped("https://api.anthropic.com/v1/messages");
+    const second = wrapped("https://api.anthropic.com/v1/messages");
+    expect((await first).status).toBe(200);
+    releaseSecond();
+    expect((await second).status).toBe(200);
+    expect(refresh.mock.calls).toEqual([["A1"], ["A1"]]);
+  });
+
+  it("retries both requests when renewal resolves to the same shared token", async () => {
+    let releaseRefresh!: (token: string) => void;
+    const renewal = new Promise<string>((resolve) => {
+      releaseRefresh = resolve;
+    });
+    let renewals = 0;
+    const refresh = vi.fn(() => {
+      renewals += 1;
+      if (renewals === 2) releaseRefresh("A2");
+      return renewal;
+    });
+    const baseFetch = vi.fn(async (_url: unknown, init?: RequestInit) =>
+      new Headers(init?.headers).get("authorization") === "Bearer A1"
+        ? new Response("unauthorized", { status: 401 })
+        : new Response("ok"),
+    );
+    const wrapped = createClaudeOAuthFetch(
+      baseFetch as unknown as typeof fetch,
+      "A1",
+      refresh,
+    );
+    const responses = await Promise.all([
+      wrapped("https://api.anthropic.com/v1/messages"),
+      wrapped("https://api.anthropic.com/v1/messages"),
+    ]);
+    expect(responses.map((r) => r.status)).toEqual([200, 200]);
+  });
+
   it("cloaks a forced tool_choice name to match the cloaked tools", () => {
     const body: Record<string, unknown> = {
       tools: [
