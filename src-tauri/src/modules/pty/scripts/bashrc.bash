@@ -44,11 +44,11 @@ if [ -z "$__TERMIGO_HOOKS_LOADED" ]; then
   _termigo_precmd() {
     local _termigo_ret=$?
     printf '\e]133;D;%s\e\\' "$_termigo_ret"
-    # No tmux DCS wrapping here. Termigo forces TERM=xterm-256color, so tmux
-    # passes OSC straight through, and wrapping it in `\ePtmux;...\e\\` made
-    # the sequence unreachable: xterm.js has no DCS unwrapper, so the OSC 7
-    # never arrived and tab.cwd, the explorer root and the AI's cwd all froze
-    # on the launch directory for every pane inside tmux.
+    # Plain OSC 7, not DCS-wrapped. Inside tmux it does not reach xterm.js
+    # either way: tmux consumes OSC 7 and OSC 133 itself (input_osc_7 stores the
+    # pane path and does not forward it), and a DCS wrapper is only forwarded
+    # when tmux runs with allow-passthrough on. A pane inside tmux therefore
+    # gets its directory from the OS (pty_get_cwd), not from this line.
     printf '\e]7;file://%s%s\e\\' "${HOSTNAME:-$(uname -n 2>/dev/null)}" "$(_termigo_urlencode "$PWD")"
     if [ -n "$TERMIGO_BLOCKS" ]; then
       # Host renders its own input bar: suppress the shell prompt (B marker

@@ -157,7 +157,8 @@ export type GitDiffComment = {
 };
 
 export const native = {
-  ptyGetCwd: (id: number) => invoke<string | null>("pty_get_cwd", { id }),
+  ptyGetCwd: (id: number, hint?: string | null) =>
+    invoke<string | null>("pty_get_cwd", { id, hint: hint ?? null }),
   ptySignal: (
     id: number,
     signal: "interrupt" | "terminate" | "kill" | "stop" | "continue",

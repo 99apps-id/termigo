@@ -78,9 +78,10 @@ function __termigo_install_prompt
     function fish_prompt
         set -l __termigo_status $status
         printf '\e]133;D;%d\e\\' $__termigo_status
-        # No tmux DCS wrapping: Termigo forces TERM=xterm-256color, so tmux
-        # passes OSC through untouched, and the wrapper made the sequence
-        # unreachable because xterm.js has no DCS unwrapper.
+        # Plain OSC 7, not DCS-wrapped. Inside tmux it does not reach xterm.js
+        # either way: tmux consumes OSC 7 and OSC 133 itself, and a DCS wrapper
+        # is only forwarded when tmux runs with allow-passthrough on. A pane
+        # inside tmux gets its directory from the OS (pty_get_cwd).
         printf '\e]7;file://%s%s\e\\' "$__TERMIGO_HOST" (__termigo_urlencode_path "$PWD")
         printf '\e]133;A\e\\'
         # Block mode: host renders its own input bar, so suppress the shell prompt

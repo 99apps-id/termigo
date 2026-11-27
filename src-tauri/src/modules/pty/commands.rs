@@ -331,8 +331,21 @@ pub fn pty_signal(state: tauri::State<PtyState>, id: u64, signal: String) -> Res
     }
 }
 
-#[tauri::command]
-pub fn pty_get_cwd(state: tauri::State<PtyState>, id: u64) -> Result<Option<String>, String> {
+/// The directory the PTY's shell is in now, read from the OS (`/proc`, or tmux
+/// when it sits between us and the shell) instead of from the shell's own OSC 7.
+///
+/// `hint` is the caller's last known path. When it names the same directory as
+/// the OS reports (a symlinked `$PWD` is the usual cause of two spellings), the
+/// hint is returned unchanged so a poll cannot flip the pane between a logical
+/// and a physical path. Linux only; elsewhere `None`.
+///
+/// `async` so the tmux lookup (a subprocess) runs off the main thread.
+#[tauri::command(async)]
+pub fn pty_get_cwd(
+    state: tauri::State<PtyState>,
+    id: u64,
+    hint: Option<String>,
+) -> Result<Option<String>, String> {
     let session = state
         .sessions
         .read()
@@ -343,15 +356,24 @@ pub fn pty_get_cwd(state: tauri::State<PtyState>, id: u64) -> Result<Option<Stri
     if session.shell_pid == 0 {
         return Ok(None);
     }
-    #[cfg(unix)]
+    #[cfg(target_os = "linux")]
     {
-        let path = std::fs::read_link(format!("/proc/{}/cwd", session.shell_pid))
-            .map_err(|e| format!("read PTY cwd: {e}"))?;
-        Ok(Some(path.to_string_lossy().into_owned()))
+        // Read what is needed and release the lock before any subprocess, so a
+        // slow lookup never holds up resize or write on the same master.
+        let (leader, tty) = {
+            let master = session.master.lock().unwrap_or_else(|e| e.into_inner());
+            (master.process_group_leader(), master.tty_name())
+        };
+        Ok(super::cwd::resolve(
+            leader,
+            tty.as_deref(),
+            session.shell_pid,
+            hint.as_deref(),
+        ))
     }
-    #[cfg(not(unix))]
+    #[cfg(not(target_os = "linux"))]
     {
-        let _ = session;
+        let _ = (session, hint);
         Ok(None)
     }
 }

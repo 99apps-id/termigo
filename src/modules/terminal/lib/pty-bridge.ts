@@ -15,8 +15,17 @@ export function signalPty(id: number, signal: PtySignal): Promise<void> {
   return invoke("pty_signal", { id, signal });
 }
 
-export function getPtyCwd(id: number): Promise<string | null> {
-  return invoke<string | null>("pty_get_cwd", { id });
+/**
+ * The directory the pane's shell is in right now, read from the OS (Linux only;
+ * `null` elsewhere). `hint` is the last path the pane reported: when it names the
+ * same directory, it is returned as-is, so a symlinked `$PWD` is not flipped to
+ * its physical spelling on every poll.
+ */
+export function getPtyCwd(
+  id: number,
+  hint?: string | null,
+): Promise<string | null> {
+  return invoke<string | null>("pty_get_cwd", { id, hint: hint ?? null });
 }
 
 export type PtyHandlers = {

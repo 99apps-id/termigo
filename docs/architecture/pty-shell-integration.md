@@ -49,6 +49,13 @@ Zsh is launched with `ZDOTDIR` pointing at a temp directory that sources our scr
 
 All integrated shells emit **OSC 7** (cwd) and **OSC 133 A/B/C/D** (prompt boundaries and exit code) so Termigo can track cwd and detect command boundaries without parsing the user's prompt.
 
+### Where a pane's cwd comes from (Linux)
+
+OSC 7 is the fast path, but it can stop without any error: a shell with no integration (`Shell::Other`, or fish without our `conf.d`), a prompt framework that replaced our hook, an `exec` into another shell, or tmux. tmux consumes OSC 7 and OSC 133 itself (`input_osc_7` stores the path on its pane and does not forward it); a DCS wrapper is forwarded only when tmux runs with `allow-passthrough on`. The pane then keeps the directory it opened in, and the tab, the explorer root and the AI's workspace all follow it.
+
+So the frontend also reads the directory from the OS. `useTerminalSession` polls `pty_get_cwd` every 2 s for each visible local pane (`syncShellCwd`). `pty/cwd.rs` answers from `/proc/<shell>/cwd`, or from `tmux display-message -p -c <tty> '#{pane_current_path}'` when the foreground process of the PTY is a tmux client (our persistence sessions and a tmux the user started by hand). `/proc` reports the physical path while OSC 7 reports the logical `$PWD`, so the frontend passes its last path as `hint`: when it names the same directory, it is returned unchanged and a symlinked project cannot flip between two spellings. An answer that arrives after a newer OSC 7 is dropped.
+
+Not covered: a shell that is not the PTY's child or foreground leader (`su`, `sudo -i`, `docker exec`) reports the directory of the process the PTY started, and macOS has no `/proc` (the command returns nothing there).
 ### Windows
 
 On Windows the shell priority is:

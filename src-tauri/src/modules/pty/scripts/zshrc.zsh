@@ -43,9 +43,10 @@ if [[ -z "$__TERMIGO_HOOKS_LOADED" ]]; then
   _termigo_precmd() {
     local _termigo_ret=$?
     printf '\e]133;D;%s\e\\' "$_termigo_ret"
-    # No tmux DCS wrapping: Termigo forces TERM=xterm-256color, so tmux passes
-    # OSC through untouched, and the wrapper made the sequence unreachable
-    # because xterm.js has no DCS unwrapper.
+    # Plain OSC 7, not DCS-wrapped. Inside tmux it does not reach xterm.js
+    # either way: tmux consumes OSC 7 and OSC 133 itself, and a DCS wrapper is
+    # only forwarded when tmux runs with allow-passthrough on. A pane inside
+    # tmux gets its directory from the OS (pty_get_cwd), not from this line.
     printf '\e]7;file://%s%s\e\\' "${HOST}" "$(_termigo_urlencode "$PWD")"
     # In block mode the host renders its own input bar, so suppress the shell
     # prompt entirely (keep only the OSC 133 B marker) and add a leading blank

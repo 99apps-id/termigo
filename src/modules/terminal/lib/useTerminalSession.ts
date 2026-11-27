@@ -74,13 +74,6 @@ type Session = {
   ptyOpening: boolean;
   initialCwd: string | undefined;
   lastCwd: string | null;
-  /**
-   * Whether this shell has ever reported its directory through OSC 7. A shell
-   * with no integration (fish, dash, a prompt framework that replaced our
-   * hook) never does, and `lastCwd` would then stay on the directory the pane
-   * was opened in. Such a pane falls back to reading the shell's real cwd.
-   */
-  oscCwdSeen: boolean;
   pendingExit: number | null;
   shellExited: boolean;
   callbacks: Callbacks;
@@ -130,49 +123,77 @@ type Session = {
 
 const sessions = new Map<number, Session>();
 
-// Linux fallback for a pane whose shell never reports its directory (OSC 7).
-// Without it `lastCwd` stays on the directory the pane opened in, so after
-// `cd ~` the tab, the explorer root and the AI's workspace all keep pointing at
-// the old project. `/proc/<shell>/cwd` is the shell's own directory, so unlike
-// an in-band OSC 7 it cannot be forged by command output. A pane that has ever
-// reported through OSC 7 is left to it, so a working integration costs nothing.
+// Linux: read each visible local pane's directory from the OS, whatever OSC 7
+// does. OSC 7 is the fast path (it lands at the prompt), but it can stop
+// without any error: a shell with no integration, a prompt framework that
+// replaced our hook, an `exec` into another shell, or tmux, which consumes the
+// sequence itself. The pane then keeps the directory it opened in, and the tab,
+// the explorer root and the AI's workspace all follow it. The OS answer
+// (/proc/<shell>/cwd, or tmux's pane_current_path) cannot be forged by command
+// output and cannot go stale. The call passes the pane's last path as a hint, so
+// when OSC 7 is healthy the answer is that same path and nothing changes.
 const CWD_POLL_MS = 2000;
 let cwdPollTimer: ReturnType<typeof setInterval> | null = null;
 let cwdPollBusy = false;
+
+/** The slice of a session the cwd poll reads and writes. */
+export type CwdSyncTarget = Pick<
+  Session,
+  | "pty"
+  | "disposed"
+  | "shellExited"
+  | "opener"
+  | "visibleNow"
+  | "lastCwd"
+  | "callbacks"
+>;
+
+/**
+ * Bring one session's `lastCwd` in line with the shell's real directory.
+ * Returns whether it changed. Skips an SSH session (its paths are remote), a
+ * hidden pane, and a shell that has exited. A report that arrives while the OS
+ * call is in flight (an OSC 7 that landed meanwhile) wins over the older answer.
+ */
+export async function syncShellCwd(
+  s: CwdSyncTarget,
+  read: (id: number, hint: string | null) => Promise<string | null> = getPtyCwd,
+): Promise<boolean> {
+  const pty = s.pty;
+  if (
+    !pty ||
+    s.disposed ||
+    s.shellExited ||
+    s.opener !== null ||
+    !s.visibleNow
+  ) {
+    return false;
+  }
+  const before = s.lastCwd;
+  let next: string | null = null;
+  try {
+    next = await read(pty.id, before);
+  } catch {
+    // The shell exited between the check and the read: nothing to track.
+    return false;
+  }
+  if (!next || next === before) return false;
+  if (s.disposed || s.pty !== pty || s.lastCwd !== before) return false;
+  s.lastCwd = next;
+  s.callbacks.onCwd?.(next);
+  return true;
+}
 
 async function pollShellCwds(): Promise<void> {
   if (cwdPollBusy || document.hidden) return;
   cwdPollBusy = true;
   try {
     for (const s of [...sessions.values()]) {
-      const pty = s.pty;
-      if (
-        !pty ||
-        s.disposed ||
-        s.shellExited ||
-        s.opener !== null ||
-        s.oscCwdSeen ||
-        !s.visibleNow
-      ) {
-        continue;
-      }
-      let next: string | null = null;
-      try {
-        next = await getPtyCwd(pty.id);
-      } catch {
-        // The shell exited between the check and the read: nothing to track.
-        continue;
-      }
-      if (!next || s.disposed || s.pty !== pty || s.oscCwdSeen) continue;
-      if (s.lastCwd === next) continue;
-      s.lastCwd = next;
-      s.callbacks.onCwd?.(next);
+      await syncShellCwd(s);
     }
   } finally {
     cwdPollBusy = false;
   }
 }
-
 function ensureCwdPoll(): void {
   if (!IS_LINUX || cwdPollTimer !== null) return;
   cwdPollTimer = setInterval(() => {
@@ -543,7 +564,6 @@ function ensureSession(
     ptyOpening: false,
     initialCwd,
     lastCwd: null,
-    oscCwdSeen: false,
     pendingExit: null,
     shellExited: false,
     callbacks: {},
@@ -975,7 +995,6 @@ function bindLeafToSlot(leafId: number, s: Session): void {
         const deco = new BlockDecorations(term, {
           onCwd: (next) => {
             markSessionReady(leafId);
-            s.oscCwdSeen = true;
             if (s.lastCwd === next) return;
             s.lastCwd = next;
             s.callbacks.onCwd?.(next);
@@ -1014,7 +1033,6 @@ function bindLeafToSlot(leafId: number, s: Session): void {
         term,
         (next) => {
           markSessionReady(leafId);
-          s.oscCwdSeen = true;
           if (s.lastCwd === next) return;
           s.lastCwd = next;
           s.callbacks.onCwd?.(next);

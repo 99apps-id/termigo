@@ -41,7 +41,7 @@ Command catalog, module map and how to add a command: [two-process model](docs/a
 
 ### PTY shell integration
 
-Shell init scripts emit **OSC 7** (cwd) and **OSC 133** (prompt/command markers); the Rust reader parses them off the byte stream. Windows goes through ConPTY. Invariant: **never serialize a pane mid-command.** OSC 7 is accepted only between commands (OSC 133 gates it, since command output is untrusted) and never before the first marker, and the scripts emit it **unwrapped** even inside tmux, because a DCS wrapper hides it from xterm.js.
+Shell init scripts emit **OSC 7** (cwd) and **OSC 133** (prompt/command markers); the Rust reader parses them off the byte stream. Windows goes through ConPTY. Invariant: **never serialize a pane mid-command.** OSC 7 is accepted only between commands (OSC 133 gates it, since command output is untrusted) and never before the first marker, and tmux eats both, so on Linux the frontend also polls `pty_get_cwd` (pty-shell-integration.md).
 
 Init scripts, `SPAWN_LOCK`, Job Object, WSL: [PTY shell integration](docs/architecture/pty-shell-integration.md).
 

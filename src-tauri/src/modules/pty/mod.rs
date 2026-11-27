@@ -1,5 +1,6 @@
 mod agent_detect;
 pub mod commands;
+mod cwd;
 mod da_filter;
 mod output;
 mod session;
