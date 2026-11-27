@@ -444,6 +444,23 @@ export function cloakClaudeToolNames(
     }
     body.tools = cloaked;
   }
+  // A forced step (`toolChoice: { type: "tool" }`) must name the cloaked tool,
+  // or the endpoint answers 400: tool_choice names a tool not in `tools`.
+  const choice = body.tool_choice as { type?: unknown; name?: unknown } | null;
+  if (
+    choice &&
+    typeof choice === "object" &&
+    choice.type === "tool" &&
+    typeof choice.name === "string" &&
+    !aliases.has(choice.name)
+  ) {
+    const original = choice.name;
+    const known = [...aliases.entries()].find(([, o]) => o === original);
+    body.tool_choice = {
+      ...choice,
+      name: known ? known[0] : cloakOne(original, aliases, present),
+    };
+  }
   if (Array.isArray(body.messages)) {
     for (const message of body.messages) {
       if (!message || typeof message !== "object") continue;
@@ -463,6 +480,31 @@ export function cloakClaudeToolNames(
     }
   }
   return aliases;
+}
+
+/**
+ * Renames cloaked tool names back on a non-streaming Messages response. The
+ * stream path has `renameCloakedStream`; `generateText` (sub-agents, summaries,
+ * memory sweep) gets JSON, and a `read_file_ide` left there matches no client
+ * tool: `bestToolMatch` refuses a 4-edit rewrite, so the step fails.
+ */
+export function renameCloakedMessage(
+  body: unknown,
+  aliases: Map<string, string>,
+): boolean {
+  const content = (body as { content?: unknown } | null)?.content;
+  if (!Array.isArray(content)) return false;
+  let changed = false;
+  for (const block of content) {
+    const b = block as { type?: unknown; name?: unknown } | null;
+    if (b?.type !== "tool_use" || typeof b.name !== "string") continue;
+    const original = aliases.get(b.name);
+    if (original) {
+      b.name = original;
+      changed = true;
+    }
+  }
+  return changed;
 }
 
 /** Renames cloaked tool names back on the streamed tool_use blocks. */
@@ -668,6 +710,29 @@ export function createClaudeOAuthFetch(
         status: res.status,
         statusText: res.statusText,
         headers: { "content-type": "text/event-stream" },
+      });
+    }
+    if (
+      aliases.size > 0 &&
+      res.ok &&
+      (res.headers.get("content-type") ?? "").includes("application/json")
+    ) {
+      const text = await res.text();
+      let out = text;
+      try {
+        const json = JSON.parse(text) as unknown;
+        if (renameCloakedMessage(json, aliases)) out = JSON.stringify(json);
+      } catch {
+        // Not JSON after all: hand the body back unchanged.
+      }
+      const headers = new Headers(res.headers);
+      // The body was read decoded and may change length.
+      headers.delete("content-length");
+      headers.delete("content-encoding");
+      return new Response(out, {
+        status: res.status,
+        statusText: res.statusText,
+        headers,
       });
     }
     return res;

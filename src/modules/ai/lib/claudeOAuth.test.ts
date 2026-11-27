@@ -14,6 +14,7 @@ import {
   dropEmptyTurns,
   extractClaudeCodeMinVersion,
   isThinkingRejection,
+  renameCloakedMessage,
   rewriteClaudeOAuthUrl,
   setClaudeCliVersionForTests,
   stripThinking,
@@ -533,5 +534,96 @@ describe("claudeOAuth", () => {
       "read_file_ide",
     ]);
     expect(aliases.get("read_file_ide")).toBe("read_file");
+  });
+
+  it("cloaks a forced tool_choice name to match the cloaked tools", () => {
+    const body: Record<string, unknown> = {
+      tools: [
+        { name: "read_file", input_schema: { type: "object" } },
+        { name: "run_subagents", input_schema: { type: "object" } },
+      ],
+      tool_choice: { type: "tool", name: "run_subagents" },
+      messages: [],
+    };
+    cloakClaudeToolNames(body);
+    expect(body.tool_choice).toEqual({
+      type: "tool",
+      name: "run_subagents_ide",
+    });
+    const auto: Record<string, unknown> = {
+      tools: [{ name: "read_file", input_schema: { type: "object" } }],
+      tool_choice: { type: "auto" },
+      messages: [],
+    };
+    cloakClaudeToolNames(auto);
+    expect(auto.tool_choice).toEqual({ type: "auto" });
+  });
+
+  it("renames cloaked tool_use names back on a JSON body, leaving others alone", () => {
+    const aliases = new Map([["read_file_ide", "read_file"]]);
+    const body = {
+      content: [
+        { type: "text", text: "read_file_ide" },
+        { type: "tool_use", id: "t1", name: "read_file_ide", input: {} },
+        { type: "tool_use", id: "t2", name: "unknown_ide", input: {} },
+      ],
+    };
+    expect(renameCloakedMessage(body, aliases)).toBe(true);
+    expect(body.content.map((b) => ("name" in b ? b.name : b.text))).toEqual([
+      "read_file_ide",
+      "read_file",
+      "unknown_ide",
+    ]);
+    expect(renameCloakedMessage({ content: "x" }, aliases)).toBe(false);
+    expect(renameCloakedMessage(null, aliases)).toBe(false);
+  });
+
+  it("reverse-maps tool names on a non-streaming (generateText) response", async () => {
+    const baseFetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            id: "msg_1",
+            type: "message",
+            role: "assistant",
+            content: [
+              {
+                type: "tool_use",
+                id: "toolu_1",
+                name: "read_file_ide",
+                input: {},
+              },
+            ],
+            stop_reason: "tool_use",
+          }),
+          {
+            status: 200,
+            headers: {
+              "content-type": "application/json",
+              "request-id": "req_42",
+              "content-length": "999",
+            },
+          },
+        ),
+    );
+    const wrapped = createClaudeOAuthFetch(
+      baseFetch as unknown as typeof fetch,
+      "tok-json",
+      async () => null,
+    );
+    const res = await wrapped("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      body: JSON.stringify({
+        model: "claude-sonnet-5",
+        messages: [{ role: "user", content: "read it" }],
+        tools: [{ name: "read_file", input_schema: { type: "object" } }],
+      }),
+    });
+    const json = (await res.json()) as {
+      content: Array<{ name?: string }>;
+    };
+    expect(json.content[0].name).toBe("read_file");
+    expect(res.headers.get("request-id")).toBe("req_42");
+    expect(res.headers.get("content-length")).toBeNull();
   });
 });
