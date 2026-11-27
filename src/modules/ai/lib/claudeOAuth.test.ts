@@ -11,12 +11,14 @@ import {
   claudeFingerprintText,
   cloakClaudeToolNames,
   createClaudeOAuthFetch,
+  dropEmptyTurns,
   extractClaudeCodeMinVersion,
   isThinkingRejection,
   rewriteClaudeOAuthUrl,
   setClaudeCliVersionForTests,
   stripThinking,
   withClaudeCodeIdentity,
+  withoutEmptyTurns,
 } from "./claudeOAuth";
 
 describe("claudeOAuth", () => {
@@ -395,6 +397,103 @@ describe("claudeOAuth", () => {
       ),
     ).toBe(false);
     expect(isThinkingRejection("thinking")).toBe(false);
+  });
+
+  it("drops a turn the endpoint would refuse, and nothing else", () => {
+    const body: Record<string, unknown> = {
+      messages: [
+        { role: "user", content: "hi" },
+        // An empty STRING is what the SDK turns into an empty text block.
+        { role: "assistant", content: "" },
+        { role: "user", content: "   " },
+        { role: "assistant", content: [{ type: "text", text: "" }] },
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "  " },
+            { type: "tool_use", id: "t1", name: "get_time", input: {} },
+          ],
+        },
+        {
+          role: "user",
+          content: [
+            { type: "tool_result", tool_use_id: "t1", content: "" },
+            { type: "text", text: "" },
+          ],
+        },
+        {
+          role: "assistant",
+          content: [{ type: "thinking", thinking: "", signature: "s" }],
+        },
+        { role: "user", content: "Reply with the single word OK." },
+      ],
+    };
+    expect(dropEmptyTurns(body)).toBe(true);
+    const messages = body.messages as Array<{ role: string; content: unknown }>;
+    expect(messages.map((m) => m.role)).toEqual([
+      "user",
+      "assistant",
+      "user",
+      "assistant",
+      "user",
+    ]);
+    // The tool call survives with its blank sibling removed, the tool result
+    // survives with its blank sibling removed, and a thinking block is kept.
+    expect(messages[1].content).toEqual([
+      { type: "tool_use", id: "t1", name: "get_time", input: {} },
+    ]);
+    expect(messages[2].content).toEqual([
+      { type: "tool_result", tool_use_id: "t1", content: "" },
+    ]);
+    expect((messages[3].content as Array<{ type: string }>)[0].type).toBe(
+      "thinking",
+    );
+    expect(
+      dropEmptyTurns({ messages: [{ role: "user", content: "ok" }] }),
+    ).toBe(false);
+    expect(dropEmptyTurns({})).toBe(false);
+  });
+
+  it("sends no empty turn through either fetch wrapper", async () => {
+    const sentBodies: Array<{ messages: Array<{ content: unknown }> }> = [];
+    const base = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) => {
+        sentBodies.push(JSON.parse(String(init?.body)));
+        return new Response('{"id":"msg"}', { status: 200 });
+      },
+    ) as unknown as typeof fetch;
+    const payload = JSON.stringify({
+      model: "claude-sonnet-5-5",
+      messages: [
+        { role: "user", content: "hi" },
+        { role: "assistant", content: "" },
+        { role: "user", content: "go" },
+      ],
+    });
+
+    await createClaudeOAuthFetch(
+      base,
+      "tok",
+      async () => null,
+    )("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      body: payload,
+    });
+    await withoutEmptyTurns(base)("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      body: payload,
+    });
+    // A body that is not JSON passes through untouched.
+    await withoutEmptyTurns(base)("https://example.test/x", {
+      method: "POST",
+      body: "not json",
+    }).catch(() => {});
+
+    expect(sentBodies).toHaveLength(2);
+    for (const sent of sentBodies) {
+      expect(JSON.stringify(sent.messages)).not.toContain('""');
+      expect(sent.messages).toHaveLength(2);
+    }
   });
 
   it("computes the fingerprint the Claude Code client advertises", async () => {

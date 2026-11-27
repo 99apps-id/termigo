@@ -782,3 +782,121 @@ func TestClaudeRequestDoesNotRetryAnUnrelated400(t *testing.T) {
 		t.Errorf("calls = %d, want 1", calls)
 	}
 }
+
+// An empty turn is refused by the endpoint ("text content blocks must be
+// non-empty", "user messages must have non-empty content"; both measured) and,
+// because it stays in the history, every later request fails the same way and
+// the run stops for good. The encoder must never send one.
+func TestAnthropicEncoderNeverSendsAnEmptyTurn(t *testing.T) {
+	textOf := func(content any) []string {
+		var out []string
+		switch c := content.(type) {
+		case string:
+			out = append(out, c)
+		case []map[string]any:
+			for _, block := range c {
+				if text, ok := block["text"].(string); ok {
+					out = append(out, text)
+				}
+			}
+		}
+		return out
+	}
+
+	t.Run("an assistant turn with nothing in it is left out and the user turns around it merge", func(t *testing.T) {
+		for _, blank := range []string{"", "   ", "\n\t"} {
+			encoded := encodeAnthropicMessages([]Message{
+				{Role: RoleUser, Content: "hi"},
+				{Role: RoleAssistant, Content: blank},
+				{Role: RoleUser, Content: "Reply with the single word OK."},
+			})
+			if len(encoded) != 1 || encoded[0]["role"] != "user" {
+				t.Fatalf("blank=%q: encoded = %#v, want one merged user turn", blank, encoded)
+			}
+			got := textOf(encoded[0]["content"])
+			if len(got) != 2 || got[0] != "hi" || got[1] != "Reply with the single word OK." {
+				t.Errorf("blank=%q: merged text = %q", blank, got)
+			}
+		}
+	})
+
+	t.Run("a blank user turn is dropped", func(t *testing.T) {
+		encoded := encodeAnthropicMessages([]Message{
+			{Role: RoleUser, Content: "hi"},
+			{Role: RoleAssistant, Content: "hello"},
+			{Role: RoleUser, Content: ""},
+		})
+		if len(encoded) != 2 {
+			t.Fatalf("encoded = %#v, want the blank user turn dropped", encoded)
+		}
+		if blank := encodeAnthropicMessages([]Message{{Role: RoleUser, Content: "  "}}); len(blank) != 0 {
+			t.Errorf("a lone blank user turn must not be sent: %#v", blank)
+		}
+	})
+
+	t.Run("an image-only user turn is kept", func(t *testing.T) {
+		encoded := encodeAnthropicMessages([]Message{{Role: RoleUser, Images: []Image{{MediaType: "image/png", Data: "AAAA"}}}})
+		if len(encoded) != 1 {
+			t.Fatalf("encoded = %#v, want the image turn kept", encoded)
+		}
+	})
+
+	t.Run("a tool turn and its result are untouched, and an empty result says so", func(t *testing.T) {
+		encoded := encodeAnthropicMessages([]Message{
+			{Role: RoleUser, Content: "go"},
+			{Role: RoleAssistant, ToolCalls: []ToolCall{{ID: "toolu_1", Name: "get_time", Arguments: "{}"}}},
+			{Role: RoleTool, ToolID: "toolu_1", Name: "get_time", Content: ""},
+		})
+		if len(encoded) != 3 || encoded[1]["role"] != "assistant" || encoded[2]["role"] != "user" {
+			t.Fatalf("encoded = %#v", encoded)
+		}
+		results, _ := encoded[2]["content"].([]map[string]any)
+		if len(results) != 1 || results[0]["type"] != "tool_result" || results[0]["content"] != "(no output)" {
+			t.Errorf("tool result = %#v", results)
+		}
+	})
+}
+
+// The tools of an OAuth request carry no cache breakpoint (the real client sends
+// none, and a 5m tool marker before a 1h system block is refused), while the
+// API-key path keeps its tool marker.
+func TestClaudeOAuthToolsCarryNoCacheBreakpoint(t *testing.T) {
+	capture := func(oauth bool) []any {
+		var tools []any
+		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			raw, _ := io.ReadAll(request.Body)
+			var body map[string]any
+			_ = json.Unmarshal(raw, &body)
+			tools, _ = body["tools"].([]any)
+			writer.Header().Set("Content-Type", "text/event-stream")
+			fmt.Fprint(writer, "data: {\"type\":\"message_stop\"}\n\n")
+		}))
+		defer server.Close()
+		client, err := newHTTPClient(Provider{ID: "anthropic", Label: "Anthropic", Kind: KindAnthropic, OAuth: oauth}, server.URL, "tok")
+		if err != nil {
+			t.Fatalf("newHTTPClient: %v", err)
+		}
+		err = client.Stream(context.Background(), ChatRequest{
+			Model:    "claude-sonnet-5-5",
+			Messages: []Message{{Role: RoleUser, Content: "hi"}},
+			Tools: []ToolDef{
+				{Name: "read_file", Schema: map[string]any{"type": "object", "properties": map[string]any{}}},
+				{Name: "list_dir", Schema: map[string]any{"type": "object", "properties": map[string]any{}}},
+			},
+		}, func(StreamEvent) error { return nil })
+		if err != nil {
+			t.Fatalf("Stream: %v", err)
+		}
+		return tools
+	}
+
+	for _, entry := range capture(true) {
+		if _, has := entry.(map[string]any)["cache_control"]; has {
+			t.Errorf("an OAuth tool must carry no cache_control: %#v", entry)
+		}
+	}
+	apiKeyTools := capture(false)
+	if last, _ := apiKeyTools[len(apiKeyTools)-1].(map[string]any); last["cache_control"] == nil {
+		t.Errorf("the API-key path keeps its tool cache marker: %#v", last)
+	}
+}

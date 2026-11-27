@@ -339,8 +339,12 @@ export async function buildLanguageModel(
     }
     case "anthropic": {
       const { createAnthropic } = await import("@ai-sdk/anthropic");
+      const { withoutEmptyTurns } = await import("./claudeOAuth");
       built = withClaudeDefaults(
-        createAnthropic({ fetch: apiFetch, apiKey: key })(resolvedModelId),
+        createAnthropic({
+          fetch: withoutEmptyTurns(apiFetch),
+          apiKey: key,
+        })(resolvedModelId),
         resolvedModelId,
       );
       break;

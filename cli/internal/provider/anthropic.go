@@ -124,12 +124,14 @@ func (c *anthropicClient) Stream(ctx context.Context, req ChatRequest, emit func
 		// Client tools are suffixed. No unavailable decoys are sent: the real
 		// client offers only tools it serves, and a decoy name the model calls
 		// resolves to no client tool, which fails the step instead of doing the
-		// work.
+		// work. The tools carry no cache breakpoint either: Anthropic processes
+		// breakpoints in tools, system, messages order and refuses a 1h block
+		// that follows a 5m one (400 "a ttl='1h' cache_control block must not
+		// come after a ttl='5m' cache_control block", measured), and the real
+		// client sends no tool marker. The system part below still caches the
+		// prefix, tools included.
 		if len(req.Tools) > 0 {
 			tools := encodeAnthropicTools(req.Tools)
-			if len(tools) > 0 {
-				tools[len(tools)-1]["cache_control"] = map[string]any{"type": "ephemeral"}
-			}
 			cloaked, names := cloakClaudeTools(tools)
 			payload["tools"] = cloaked
 			aliases = names
@@ -359,7 +361,7 @@ func encodeAnthropicMessages(messages []Message) []map[string]any {
 		message := messages[index]
 		switch message.Role {
 		case RoleUser:
-			out = append(out, map[string]any{"role": "user", "content": anthropicUserContent(message)})
+			out = appendAnthropicUserTurn(out, anthropicUserContent(message))
 		case RoleAssistant:
 			blocks := make([]map[string]any, 0, len(message.ToolCalls)+1)
 			if strings.TrimSpace(message.Content) != "" {
@@ -374,7 +376,13 @@ func encodeAnthropicMessages(messages []Message) []map[string]any {
 				})
 			}
 			if len(blocks) == 0 {
-				blocks = append(blocks, map[string]any{"type": "text", "text": ""})
+				// A turn with nothing to replay (a step that only thought, or
+				// was cut before it wrote anything) carries nothing the next
+				// request can use. Sending it as an empty text block is
+				// refused with 400 "text content blocks must be non-empty",
+				// and because the turn stays in the history, every later
+				// request fails the same way and the run never recovers.
+				continue
 			}
 			out = append(out, map[string]any{"role": "assistant", "content": blocks})
 		case RoleTool:
@@ -383,10 +391,66 @@ func encodeAnthropicMessages(messages []Message) []map[string]any {
 				index++
 				results = append(results, anthropicToolResult(messages[index]))
 			}
-			out = append(out, map[string]any{"role": "user", "content": results})
+			out = appendAnthropicUserTurn(out, results)
 		}
 	}
 	return out
+}
+
+// appendAnthropicUserTurn adds a user turn. Two things keep the request valid:
+// a turn with nothing in it is dropped (the endpoint refuses "user messages
+// must have non-empty content" and blank text blocks, measured), and a user
+// turn that follows another one is merged into it, which is what happens when
+// an empty assistant turn between them was left out.
+func appendAnthropicUserTurn(out []map[string]any, content any) []map[string]any {
+	switch c := content.(type) {
+	case string:
+		if strings.TrimSpace(c) == "" {
+			return out
+		}
+	case []map[string]any:
+		kept := nonEmptyTextBlocks(c)
+		if len(kept) == 0 {
+			return out
+		}
+		content = kept
+	}
+	if len(out) == 0 || out[len(out)-1]["role"] != "user" {
+		return append(out, map[string]any{"role": "user", "content": content})
+	}
+	last := out[len(out)-1]
+	var blocks []map[string]any
+	switch previous := last["content"].(type) {
+	case string:
+		if strings.TrimSpace(previous) != "" {
+			blocks = append(blocks, map[string]any{"type": "text", "text": previous})
+		}
+	case []map[string]any:
+		blocks = append(blocks, previous...)
+	}
+	switch next := content.(type) {
+	case string:
+		blocks = append(blocks, map[string]any{"type": "text", "text": next})
+	case []map[string]any:
+		blocks = append(blocks, next...)
+	}
+	last["content"] = blocks
+	return out
+}
+
+// nonEmptyTextBlocks drops blank text blocks. The endpoint refuses a text block
+// with empty content, so replayed history must never carry one.
+func nonEmptyTextBlocks(blocks []map[string]any) []map[string]any {
+	kept := make([]map[string]any, 0, len(blocks))
+	for _, block := range blocks {
+		if block["type"] == "text" {
+			if text, _ := block["text"].(string); strings.TrimSpace(text) == "" {
+				continue
+			}
+		}
+		kept = append(kept, block)
+	}
+	return kept
 }
 
 func anthropicUserContent(message Message) any {

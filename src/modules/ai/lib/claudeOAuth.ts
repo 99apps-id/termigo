@@ -133,6 +133,80 @@ export function stripThinking(body: Record<string, unknown>): boolean {
   return changed;
 }
 
+/**
+ * The endpoint refuses an empty turn: a text block with no text ("messages:
+ * text content blocks must be non-empty") and a user message with no content
+ * ("user messages must have non-empty content"), both measured. The AI SDK
+ * drops an empty text PART but turns a message whose content is an empty
+ * STRING into exactly such a block, and a turn like that stays in the history,
+ * so every later request fails the same way and the run never recovers.
+ *
+ * Removes blank text blocks and any message left with nothing in it. A message
+ * that carries a tool call, a tool result, a thinking block or an image is
+ * never touched. Returns whether anything changed.
+ */
+export function dropEmptyTurns(body: Record<string, unknown>): boolean {
+  if (!Array.isArray(body.messages)) return false;
+  const isBlankText = (block: unknown): boolean => {
+    const b = block as { type?: unknown; text?: unknown } | null;
+    return (
+      !!b &&
+      b.type === "text" &&
+      (typeof b.text !== "string" || b.text.trim() === "")
+    );
+  };
+  let changed = false;
+  const kept: unknown[] = [];
+  for (const message of body.messages) {
+    if (!message || typeof message !== "object") {
+      kept.push(message);
+      continue;
+    }
+    const record = message as { content?: unknown };
+    const content = record.content;
+    if (typeof content === "string") {
+      if (content.trim() === "") {
+        changed = true;
+        continue;
+      }
+    } else if (Array.isArray(content)) {
+      const blocks = content.filter((block) => !isBlankText(block));
+      if (blocks.length !== content.length) {
+        changed = true;
+        record.content = blocks;
+      }
+      if (blocks.length === 0) {
+        changed = true;
+        continue;
+      }
+    }
+    kept.push(message);
+  }
+  if (changed) body.messages = kept;
+  return changed;
+}
+
+/**
+ * Wraps `fetch` so a Messages request never carries an empty turn (see
+ * `dropEmptyTurns`). This is for the API-key route: the endpoint's rule is the
+ * API's, not OAuth's. The OAuth wrapper applies the same filter itself.
+ */
+export function withoutEmptyTurns(baseFetch: typeof fetch): typeof fetch {
+  return async (input, init) => {
+    if (typeof init?.body === "string") {
+      try {
+        const parsed = JSON.parse(init.body) as Record<string, unknown>;
+        if (dropEmptyTurns(parsed)) {
+          return baseFetch(input, { ...init, body: JSON.stringify(parsed) });
+        }
+      } catch {
+        // Not JSON: nothing to filter, send it as it is.
+      }
+    }
+    return baseFetch(input, init);
+  };
+}
+
 export function hasPdfDocumentInMessages(messages: unknown): boolean {
   if (!Array.isArray(messages)) return false;
   for (const msg of messages) {
@@ -511,6 +585,7 @@ export function createClaudeOAuthFetch(
     if (typeof init?.body === "string") {
       try {
         const parsed = JSON.parse(init.body) as Record<string, unknown>;
+        dropEmptyTurns(parsed);
         parsed.system = withClaudeCodeIdentity(parsed.system);
         hasPdf = hasPdfDocumentInMessages(parsed.messages);
         aliases = cloakClaudeToolNames(parsed);
