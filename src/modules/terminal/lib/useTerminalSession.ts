@@ -2,6 +2,7 @@ import { ensureMonoFontsLoaded } from "@/lib/fonts";
 import { IS_LINUX } from "@/lib/platform";
 import { usePreferencesStore } from "@/modules/settings/preferences";
 import { invoke } from "@tauri-apps/api/core";
+import { info as logInfo, warn as logWarn } from "@tauri-apps/plugin-log";
 import type { SearchAddon } from "@xterm/addon-search";
 import {
   useCallback,
@@ -148,6 +149,13 @@ export type CwdSyncTarget = Pick<
   | "callbacks"
 >;
 
+/** Where the poll reports what it did. Silence here is how this bug survived:
+ * a poll that fails looks exactly like a pane that has not moved. */
+export type CwdSyncLog = {
+  moved: (ptyId: number, from: string | null, to: string) => void;
+  failed: (ptyId: number, error: string) => void;
+};
+
 /**
  * Bring one session's `lastCwd` in line with the shell's real directory.
  * Returns whether it changed. Skips an SSH session (its paths are remote), a
@@ -157,6 +165,7 @@ export type CwdSyncTarget = Pick<
 export async function syncShellCwd(
   s: CwdSyncTarget,
   read: (id: number, hint: string | null) => Promise<string | null> = getPtyCwd,
+  log?: CwdSyncLog,
 ): Promise<boolean> {
   const pty = s.pty;
   if (
@@ -172,33 +181,66 @@ export async function syncShellCwd(
   let next: string | null = null;
   try {
     next = await read(pty.id, before);
-  } catch {
-    // The shell exited between the check and the read: nothing to track.
+  } catch (e) {
+    // Usually the shell exiting between the check and the read, but it can also
+    // be a real failure (/proc unreadable, an unknown pid), so it is reported.
+    log?.failed(pty.id, e instanceof Error ? e.message : String(e));
     return false;
   }
   if (!next || next === before) return false;
   if (s.disposed || s.pty !== pty || s.lastCwd !== before) return false;
   s.lastCwd = next;
   s.callbacks.onCwd?.(next);
+  log?.moved(pty.id, before, next);
   return true;
 }
 
+// Reported to the app log (Linux: ~/.local/share/<identifier>/logs). A change is
+// logged every time; a failure once per distinct message, so a persistent one
+// cannot flood the file at the 2 s poll rate.
+const reportedCwdFailures = new Set<string>();
+const cwdSyncLog: CwdSyncLog = {
+  moved: (id, from, to) => {
+    void logInfo(`[cwd] pty ${id}: ${from ?? "(none)"} -> ${to}`).catch(
+      () => {},
+    );
+  },
+  failed: (id, error) => {
+    const key = error.replace(/\d+/g, "N");
+    if (reportedCwdFailures.has(key)) return;
+    reportedCwdFailures.add(key);
+    void logWarn(`[cwd] pty ${id}: read failed: ${error}`).catch(() => {});
+  },
+};
+
 async function pollShellCwds(): Promise<void> {
-  if (cwdPollBusy || document.hidden) return;
+  // No `document.hidden` guard. It was meant to skip a minimized window, but a
+  // webview that reports hidden while the user is typing would switch the poll
+  // off with no sign, and a skipped tick costs one cheap IPC per visible pane.
+  if (cwdPollBusy) return;
   cwdPollBusy = true;
   try {
     for (const s of [...sessions.values()]) {
-      await syncShellCwd(s);
+      await syncShellCwd(s, getPtyCwd, cwdSyncLog);
     }
   } finally {
     cwdPollBusy = false;
   }
 }
+
 function ensureCwdPoll(): void {
   if (!IS_LINUX || cwdPollTimer !== null) return;
   cwdPollTimer = setInterval(() => {
     void pollShellCwds();
   }, CWD_POLL_MS);
+  // Catch up at once when the user comes back to the window, instead of
+  // waiting out the interval.
+  const catchUp = () => void pollShellCwds();
+  window.addEventListener("focus", catchUp);
+  document.addEventListener("visibilitychange", catchUp);
+  void logInfo("[cwd] poller started (every 2s, visible local panes)").catch(
+    () => {},
+  );
 }
 
 // Block-overlay viewport listeners, keyed by leafId at module scope so the

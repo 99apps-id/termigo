@@ -62,25 +62,28 @@ pub(crate) fn prefer_hint(actual: PathBuf, hint: Option<&str>) -> String {
 /// the client started in; tmux is asked instead, for the pane shown to that
 /// client (`-c <tty>`), which covers both our own persistence sessions and a
 /// tmux the user started by hand.
+///
+/// A failure is returned, not swallowed: the caller logs it, because a poll that
+/// quietly returns nothing looks exactly like a pane that has not moved.
 #[cfg(target_os = "linux")]
 pub(crate) fn resolve(
     leader: Option<i32>,
     tty: Option<&Path>,
     shell_pid: u64,
     hint: Option<&str>,
-) -> Option<String> {
+) -> Result<String, String> {
     if let (Some(leader), Some(tty)) = (leader.filter(|pid| *pid > 0), tty) {
         let comm = std::fs::read_to_string(format!("/proc/{leader}/comm")).unwrap_or_default();
         if is_tmux_comm(&comm) {
             if let Some(path) = tmux_pane_path(tty) {
-                return Some(prefer_hint(path, hint));
+                return Ok(prefer_hint(path, hint));
             }
         }
     }
-    let actual = std::fs::read_link(format!("/proc/{shell_pid}/cwd")).ok()?;
-    Some(prefer_hint(actual, hint))
+    let actual = std::fs::read_link(format!("/proc/{shell_pid}/cwd"))
+        .map_err(|e| format!("read /proc/{shell_pid}/cwd: {e}"))?;
+    Ok(prefer_hint(actual, hint))
 }
-
 #[cfg(target_os = "linux")]
 fn tmux_pane_path(tty: &Path) -> Option<PathBuf> {
     use std::process::{Command, Stdio};

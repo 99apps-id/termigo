@@ -353,23 +353,18 @@ pub fn pty_get_cwd(
         .get(&id)
         .cloned()
         .ok_or_else(|| format!("no PTY session {id}"))?;
-    if session.shell_pid == 0 {
-        return Ok(None);
-    }
     #[cfg(target_os = "linux")]
     {
+        if session.shell_pid == 0 {
+            return Err(format!("PTY session {id} has no known shell pid"));
+        }
         // Read what is needed and release the lock before any subprocess, so a
         // slow lookup never holds up resize or write on the same master.
         let (leader, tty) = {
             let master = session.master.lock().unwrap_or_else(|e| e.into_inner());
             (master.process_group_leader(), master.tty_name())
         };
-        Ok(super::cwd::resolve(
-            leader,
-            tty.as_deref(),
-            session.shell_pid,
-            hint.as_deref(),
-        ))
+        super::cwd::resolve(leader, tty.as_deref(), session.shell_pid, hint.as_deref()).map(Some)
     }
     #[cfg(not(target_os = "linux"))]
     {

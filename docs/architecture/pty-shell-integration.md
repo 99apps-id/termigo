@@ -55,6 +55,8 @@ OSC 7 is the fast path, but it can stop without any error: a shell with no integ
 
 So the frontend also reads the directory from the OS. `useTerminalSession` polls `pty_get_cwd` every 2 s for each visible local pane (`syncShellCwd`). `pty/cwd.rs` answers from `/proc/<shell>/cwd`, or from `tmux display-message -p -c <tty> '#{pane_current_path}'` when the foreground process of the PTY is a tmux client (our persistence sessions and a tmux the user started by hand). `/proc` reports the physical path while OSC 7 reports the logical `$PWD`, so the frontend passes its last path as `hint`: when it names the same directory, it is returned unchanged and a symlinked project cannot flip between two spellings. An answer that arrives after a newer OSC 7 is dropped.
 
+Diagnosing a pane that does not follow `cd`: the app log (Linux: `~/.local/share/id.99apps.termigo/logs/`) shows `[cwd] poller started` once, `[cwd] pty N: <from> -> <to>` on every change the poll makes, and `[cwd] pty N: read failed: ...` once per distinct failure (`read /proc/<pid>/cwd`, an unknown shell pid). No `poller started` line means the Linux poll never ran; a `read failed` line names why; neither with a stale pane means the OS answered with the pane's own path.
+
 Not covered: a shell that is not the PTY's child or foreground leader (`su`, `sudo -i`, `docker exec`) reports the directory of the process the PTY started, and macOS has no `/proc` (the command returns nothing there).
 ### Windows
 

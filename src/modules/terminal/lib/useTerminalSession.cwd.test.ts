@@ -94,4 +94,33 @@ describe("syncShellCwd", () => {
     expect(await syncShellCwd(s, read)).toBe(false);
     expect(s.lastCwd).toBe("/home/me/termixgo");
   });
+
+  it("reports a move and a failed read instead of staying silent", async () => {
+    const log = { moved: vi.fn(), failed: vi.fn() };
+
+    const moved = target();
+    await syncShellCwd(moved, async () => "/home/me", log);
+    expect(log.moved).toHaveBeenCalledWith(7, "/home/me/termixgo", "/home/me");
+
+    const broken = target();
+    await syncShellCwd(
+      broken,
+      async () => {
+        throw new Error("read /proc/123/cwd: Permission denied (os error 13)");
+      },
+      log,
+    );
+    expect(log.failed).toHaveBeenCalledWith(
+      7,
+      "read /proc/123/cwd: Permission denied (os error 13)",
+    );
+    // Neither a no-op nor a stale answer is reported as a move.
+    log.moved.mockClear();
+    await syncShellCwd(target(), async () => "/home/me/termixgo", log);
+    expect(log.moved).not.toHaveBeenCalled();
+  });
+
+  it("works without a logger", async () => {
+    expect(await syncShellCwd(target(), async () => "/home/me")).toBe(true);
+  });
 });
