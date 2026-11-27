@@ -536,6 +536,53 @@ describe("claudeOAuth", () => {
     expect(aliases.get("read_file_ide")).toBe("read_file");
   });
 
+  it("keeps colliding >=128-char tool names distinct and terminates", () => {
+    const prefix = `mcp__server__${"x".repeat(200)}`;
+    const body: Record<string, unknown> = {
+      tools: [
+        { name: `${prefix}_alpha`, input_schema: { type: "object" } },
+        { name: `${prefix}_beta`, input_schema: { type: "object" } },
+        { name: `${prefix}_gamma`, input_schema: { type: "object" } },
+      ],
+      messages: [],
+    };
+    const aliases = cloakClaudeToolNames(body);
+    const names = (body.tools as Array<{ name: string }>).map((t) => t.name);
+    expect(new Set(names).size).toBe(3);
+    for (const n of names) {
+      expect(n.length).toBeLessThanOrEqual(128);
+      expect(n).toMatch(/^[a-zA-Z0-9_-]+$/);
+    }
+    expect(names[0].endsWith("_ide")).toBe(true);
+    expect(names.slice(1).map((n) => n.slice(-2))).toEqual(["_2", "_3"]);
+    expect(names.map((n) => aliases.get(n))).toEqual([
+      `${prefix}_alpha`,
+      `${prefix}_beta`,
+      `${prefix}_gamma`,
+    ]);
+  });
+
+  it("passes the rejected token to the 401 renewal and skips a no-op retry", async () => {
+    let calls = 0;
+    const baseFetch = vi.fn(async () => {
+      calls += 1;
+      return new Response("unauthorized", { status: 401 });
+    });
+    const refresh = vi.fn(async (rejected: string) => rejected);
+    const wrapped = createClaudeOAuthFetch(
+      baseFetch as unknown as typeof fetch,
+      "tok-revoked",
+      refresh,
+    );
+    const res = await wrapped("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      body: JSON.stringify({ model: "m", messages: [] }),
+    });
+    expect(refresh).toHaveBeenCalledWith("tok-revoked");
+    expect(calls).toBe(1);
+    expect(res.status).toBe(401);
+  });
+
   it("cloaks a forced tool_choice name to match the cloaked tools", () => {
     const body: Record<string, unknown> = {
       tools: [
