@@ -1394,6 +1394,17 @@ export async function startTelegramDispatch(
         lower === "izinkan"
       ) {
         recordTelegramText(text);
+        // A bare "ok" is ambiguous once several cards are queued: one that
+        // arrived after the user read the screen would be approved unseen.
+        // Free text approves a single pending card; more need the buttons.
+        if (pendingApprovals.length > 1) {
+          await sendTelegram(
+            chatId,
+            `${pendingApprovals.length} actions are waiting for approval. Tap Approve on each card, or send /approve to allow all of them.`,
+            signal,
+          ).catch(() => {});
+          return;
+        }
         for (const p of pendingApprovals) {
           store.useChatStore.getState().respondToApproval(p.id, true);
           aqStore.useApprovalQueue.getState().respond([p.id], true);

@@ -869,6 +869,100 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
         globalThis.fetch = origFetch;
       }
     });
+
+    const captureTelegram = () => {
+      const sentBodies: Array<{ text?: string }> = [];
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn(async (_url, init) => {
+        if (init?.body) {
+          try {
+            sentBodies.push(JSON.parse(String(init.body)));
+          } catch {}
+        }
+        return {
+          ok: true,
+          json: async () => ({ ok: true, result: { message_id: 1 } }),
+          text: async () => JSON.stringify({ ok: true }),
+        } as unknown as Response;
+      });
+      return {
+        sentBodies,
+        restore: () => {
+          globalThis.fetch = origFetch;
+        },
+      };
+    };
+
+    it("an unpaired bot ignores prompts and owner commands from strangers", async () => {
+      useTelegramStore.getState().setChatId(null);
+      useTelegramStore.getState().setOwnerUserId(null);
+      const cap = captureTelegram();
+      try {
+        for (const text of ["hapus semua file di home", "/run ls", "/status"]) {
+          await _testOnly.handleUpdate(
+            {
+              update_id: 1,
+              message: { chat: { id: 999 }, from: { id: 555 }, text },
+            },
+            new AbortController().signal,
+          );
+        }
+        expect(cap.sentBodies).toEqual([]);
+        expect(useTelegramStore.getState().chatId).toBeNull();
+      } finally {
+        cap.restore();
+      }
+    });
+
+    it("a group member cannot take over ownership with a bare /pair", async () => {
+      useTelegramStore.getState().setChatId("-100777");
+      useTelegramStore.getState().setOwnerUserId("222");
+      const cap = captureTelegram();
+      try {
+        await _testOnly.handleUpdate(
+          {
+            update_id: 1,
+            message: {
+              chat: { id: -100777 },
+              from: { id: 333 },
+              text: "/pair",
+            },
+          },
+          new AbortController().signal,
+        );
+        expect(useTelegramStore.getState().ownerUserId).toBe("222");
+        expect(cap.sentBodies.some((b) => b.text?.includes("Paired"))).toBe(
+          false,
+        );
+      } finally {
+        cap.restore();
+      }
+    });
+
+    it("the current owner can still re-pair without the code", async () => {
+      useTelegramStore.getState().setChatId("-100777");
+      useTelegramStore.getState().setOwnerUserId("222");
+      const cap = captureTelegram();
+      try {
+        await _testOnly.handleUpdate(
+          {
+            update_id: 1,
+            message: {
+              chat: { id: -100777 },
+              from: { id: 222 },
+              text: "/pair",
+            },
+          },
+          new AbortController().signal,
+        );
+        expect(useTelegramStore.getState().ownerUserId).toBe("222");
+        expect(cap.sentBodies.some((b) => b.text?.includes("Paired"))).toBe(
+          true,
+        );
+      } finally {
+        cap.restore();
+      }
+    });
   });
 
   describe("getPendingApprovals extraction and deduplication", () => {
@@ -941,6 +1035,17 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
   });
 
   describe("interactive approval and continue cards", () => {
+    // Callbacks below come from owner 222 in chat 111; an unpaired bot now
+    // rejects every sensitive callback, so the pairing must be explicit.
+    beforeEach(() => {
+      useTelegramStore.getState().setChatId("111");
+      useTelegramStore.getState().setOwnerUserId("222");
+    });
+    afterEach(() => {
+      useTelegramStore.getState().setChatId(null);
+      useTelegramStore.getState().setOwnerUserId(null);
+    });
+
     it("parses colon-separated approval ids in ap: callback correctly", async () => {
       const state = await import("../ai/store/chatStore");
       state.useChatStore.getState().patchAgentMeta({
@@ -1080,6 +1185,58 @@ describe("Telegram bot relay message tracking and echo suppression", () => {
           sentBodies.some((b) => b.text?.includes("Approved 1 pending action")),
         ).toBe(true);
       } finally {
+        state.useChatStore
+          .getState()
+          .patchAgentMeta({ status: "idle", pendingApprovals: [] });
+        globalThis.fetch = origFetch;
+      }
+    });
+
+    it("a bare 'ok' does not approve several pending actions at once", async () => {
+      const state = await import("../ai/store/chatStore");
+      state.useChatStore.getState().newSession();
+      state.useChatStore.getState().patchAgentMeta({
+        status: "awaiting-approval",
+        pendingApprovals: [
+          { id: "appr-multi-1", toolName: "read_file", summary: "read a" },
+          { id: "appr-multi-2", toolName: "bash_run", summary: "rm -rf build" },
+        ],
+      });
+      const respond = vi.spyOn(
+        state.useChatStore.getState(),
+        "respondToApproval",
+      );
+      const sentBodies: Array<{ text?: string }> = [];
+      const origFetch = globalThis.fetch;
+      globalThis.fetch = vi.fn(async (_url, init) => {
+        if (init?.body) {
+          try {
+            sentBodies.push(JSON.parse(String(init.body)));
+          } catch {}
+        }
+        return {
+          ok: true,
+          json: async () => ({ ok: true, result: { message_id: 11 } }),
+          text: async () => JSON.stringify({ ok: true }),
+        } as unknown as Response;
+      });
+      try {
+        await _testOnly.startTelegramDispatch(
+          "ok",
+          111,
+          new AbortController().signal,
+          "Task received",
+        );
+        expect(respond).not.toHaveBeenCalledWith("appr-multi-1", true);
+        expect(respond).not.toHaveBeenCalledWith("appr-multi-2", true);
+        expect(
+          sentBodies.some((b) => b.text?.includes("2 actions are waiting")),
+        ).toBe(true);
+        expect(sentBodies.some((b) => b.text?.includes("Approved"))).toBe(
+          false,
+        );
+      } finally {
+        respond.mockRestore();
         state.useChatStore
           .getState()
           .patchAgentMeta({ status: "idle", pendingApprovals: [] });

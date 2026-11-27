@@ -102,8 +102,9 @@ function isOwnerUser(
   const ownerUserId = store.ownerUserId;
   if (ownerUserId) return !!from && String(from.id) === String(ownerUserId);
   const chatId = store.chatId;
-  // Unpaired bot: open to all chats (the documented state).
-  if (!chatId) return true;
+  // Unpaired bot: nobody is the owner yet. Failing open here let any Telegram
+  // user who found the username drive the agent before /pair (AUDIT-2026-11).
+  if (!chatId) return false;
   // A GROUP chatId with no ownerUserId cannot identify anybody: every member
   // shares the chat id, so the old `return true` here handed owner actions to
   // the whole group (NIT-1, AUDIT-2026-10). /pair always records the user id;
@@ -126,7 +127,7 @@ export async function buildStatus(): Promise<string> {
   const lines: (string | null)[] = [
     `Termigo bot ${store.online ? "online" : "offline"}`,
     `Enabled: ${store.enabled ? "yes" : "no"}`,
-    `Paired: ${store.chatId ? `yes (ID: ${store.chatId})` : "no (open to all chats)"}`,
+    `Paired: ${store.chatId ? `yes (ID: ${store.chatId})` : "no (send /pair <code>)"}`,
   ];
   try {
     const chat = await import("../ai/store/chatStore");
@@ -878,6 +879,8 @@ export async function handleUpdate(
   const chatId = msg.chat.id;
   const owner = useTelegramStore.getState().chatId;
   if (owner && String(owner) !== String(chatId)) return;
+  // Unpaired: only /pair is accepted, matching the Go relay (cli/internal/telegram).
+  if (!owner && msg.text?.trim().split(/\s+/)[0] !== "/pair") return;
 
   if (!msg.text) {
     await handleIncomingMedia(msg, chatId, signal);
@@ -908,7 +911,10 @@ export async function handleUpdate(
       if (curOwner && String(curOwner) !== String(chatId)) {
         return;
       }
-      if (!curOwner) {
+      // A paired GROUP shares its chat id with every member, so a bare /pair
+      // from a non-owner would overwrite ownerUserId (takeover). Only the
+      // current owner may re-pair without the code.
+      if (!curOwner || !isOwnerUser(msg.from)) {
         // Unpaired bot: anyone who finds the username could claim it with a
         // bare /pair, so pairing requires the code shown in Termigo Settings.
         // The code itself is never sent over Telegram.
@@ -916,9 +922,11 @@ export async function handleUpdate(
         if (tail !== code) {
           await sendTelegram(
             chatId,
-            tail
-              ? "Wrong pairing code. Open Termigo → Settings → Telegram to see the current code, then send /pair <code>."
-              : "This bot is not paired yet. Open Termigo → Settings → Telegram to see the pairing code, then send /pair <code>.",
+            curOwner && !tail
+              ? "This bot is already paired to another user."
+              : tail
+                ? "Wrong pairing code. Open Termigo → Settings → Telegram to see the current code, then send /pair <code>."
+                : "This bot is not paired yet. Open Termigo → Settings → Telegram to see the pairing code, then send /pair <code>.",
             signal,
           );
           return;
@@ -946,7 +954,7 @@ export async function handleUpdate(
       useTelegramStore.getState().setOwnerUserId(null);
       await sendTelegram(
         chatId,
-        "Bot has been unpaired. Any chat can now interact with this bot.",
+        "Bot has been unpaired. Send /pair <code> from Termigo Settings to pair again.",
         signal,
       );
       return;
